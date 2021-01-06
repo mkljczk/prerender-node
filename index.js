@@ -24,9 +24,19 @@ var prerender = module.exports = function(req, res, next) {
     prerender.getPrerenderedPageResponse(req, function(err, prerenderedResponse){
       prerender.afterRenderFn(err, req, prerenderedResponse);
 
-      if(prerenderedResponse){
-        res.writeHead(prerenderedResponse.statusCode, prerenderedResponse.headers);
-        return res.end(prerenderedResponse.body);
+      if (prerenderedResponse){
+        if (req.headers['accept-encoding'] && req.headers['accept-encoding'].includes('br')) {
+          zlib.brotliCompress(prerenderedResponse.body, (err, resp) => {
+            res.writeHead(prerenderedResponse.statusCode, {
+              ...prerenderedResponse.headers,
+              'Content-Encoding': 'br',
+            });
+            return res.end(resp);
+          });
+        } else {
+          res.writeHead(prerenderedResponse.statusCode, prerenderedResponse.headers);
+          return res.end(prerenderedResponse.body);
+        }
       } else {
         next(err);
       }
