@@ -1,4 +1,4 @@
-var fetch = require('node-fetch').default
+var request = require('request')
   , url = require('url')
   , zlib = require('zlib');
 
@@ -180,12 +180,13 @@ prerender.shouldShowPrerenderedPage = function(req) {
   return isRequestingPrerenderedPage;
 };
 
+
 prerender.prerenderServerRequestOptions = {};
 
 prerender.getPrerenderedPageResponse = function(req, callback) {
-  var input = url.parse(prerender.buildApiUrl(req))
-  var init = {
-//     follow: 0,
+  var options = {
+    uri: url.parse(prerender.buildApiUrl(req)),
+    followRedirect: false,
     headers: {}
   };
   for (var attrname in this.prerenderServerRequestOptions) { options[attrname] = this.prerenderServerRequestOptions[attrname]; }
@@ -204,23 +205,49 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
     options.headers['X-Prerender-Token'] = this.prerenderToken || process.env.PRERENDER_TOKEN;
   }
 
-  var headers = {};
-  var statusCode;
-
-  fetch(input, init)
-    .then(function(response) {
-      for (var header of response.headers) {
-        headers[header] = response.headers[header];
-      }
-      statusCode = response.status;
-      return response.text()
-    })
-    .then(function(response) {
-      callback(null, { headers: headers, statusCode: statusCode, body: response });
-    }).catch(function(err) {
-      callback(err);
-    });
+  request.get(options).on('response', function(response) {
+    if(response.headers['content-encoding'] && response.headers['content-encoding'] === 'gzip') {
+      prerender.gunzipResponse(response, callback);
+    } else {
+      prerender.plainResponse(response, callback);
+    }
+  }).on('error', function(err) {
+    callback(err);
+  });
 };
+
+prerender.gunzipResponse = function(response, callback) {
+  var gunzip = zlib.createGunzip()
+    , content = '';
+
+  gunzip.on('data', function(chunk) {
+    content += chunk;
+  });
+  gunzip.on('end', function() {
+    response.body = content;
+    delete response.headers['content-encoding'];
+    delete response.headers['content-length'];
+    callback(null, response);
+  });
+  gunzip.on('error', function(err){
+    callback(err);
+  });
+
+  response.pipe(gunzip);
+};
+
+prerender.plainResponse = function(response, callback) {
+  var content = '';
+
+  response.on('data', function(chunk) {
+    content += chunk;
+  });
+  response.on('end', function() {
+    response.body = content;
+    callback(null, response);
+  });
+};
+
 
 prerender.buildApiUrl = function(req) {
   var prerenderUrl = prerender.getPrerenderServiceUrl();
